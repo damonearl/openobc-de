@@ -35,6 +35,7 @@
 #include <lpc17xx_exti.h>
 
 #include <cstdio>
+#include <ctime>
 #include <cmath>
 #include <stdlib.h>
 #include <Bus.h>
@@ -54,6 +55,25 @@ bool doQuery = false;
 bool doUnlock = false;
 bool doLock = false;
 bool doSnoop = false;
+bool isTiming = false;
+bool accelTimerMode = false;
+bool accelReadyToTime = false;
+
+Timer timerTimer;
+double timedSeconds;
+
+float accelFrom;
+float accelTo;
+double accelTimed = 0.0;
+float curSpeed;
+
+float avgMilesPerGallon;
+float numOfMileageMeasures;
+
+int cur1000number;
+int cur100number;
+int cur10number;
+int cur1number;
 
 extern "C" void Reset_Handler(void);
 
@@ -158,8 +178,10 @@ OpenOBC::OpenOBC()
 		displayMode = DISPLAY_OUTPUTS;
 	else if(defaultDisplayModeString == "DISPLAY_SPEED")
 		displayMode = DISPLAY_SPEED;
-	else if(defaultDisplayModeString == "DISPLAY_TEMP")
-		displayMode = DISPLAY_TEMP;
+	else if(defaultDisplayModeString == "DISPLAY_TEMP_1")
+		displayMode = DISPLAY_TEMP_1;
+	else if(defaultDisplayModeString == "DISPLAY_CODE")
+		displayMode = DISPLAY_CODE;
 	else if(defaultDisplayModeString == "DISPLAY_VOLTAGE")
 		displayMode = DISPLAY_VOLTAGE;
 	else
@@ -170,6 +192,7 @@ OpenOBC::OpenOBC()
 		useMetricSystem = false;
 	else
 		useMetricSystem = false;
+	clockDisplayMode = DISPLAY_CLOCK;
 
 	//rtc configuration
 	rtc = new RTC(); rtcS = rtc;
@@ -270,13 +293,16 @@ OpenOBC::OpenOBC()
 	keypad = new ObcKeypad(*x0, *x1, *x2, *x3, *x4, *y0, *y1, *y2, *y3, interruptManager);
 	keypad->attach(BUTTON_1000, this, &OpenOBC::button1000);
 	keypad->attach(BUTTON_100, this, &OpenOBC::button100);
+	keypad->attach(BUTTON_10, this, &OpenOBC::button10);
 	keypad->attach(BUTTON_1, this, &OpenOBC::button1);
 	keypad->attach(BUTTON_CONSUM, this, &OpenOBC::buttonConsum);
 	keypad->attach(BUTTON_RANGE, this, &OpenOBC::buttonRange);
-	keypad->attach(BUTTON_CODE, this, &OpenOBC::buttonTemp);
+	keypad->attach(BUTTON_TEMP, this, &OpenOBC::buttonTemp);
+	keypad->attach(BUTTON_CODE, this, &OpenOBC::buttonCode);
 	keypad->attach(BUTTON_SPEED, this, &OpenOBC::buttonSpeed);
 	keypad->attach(BUTTON_DIST, this, &OpenOBC::buttonDist);
 	keypad->attach(BUTTON_TIMER, this, &OpenOBC::buttonTimer);
+	keypad->attach(BUTTON_LIMIT, this, &OpenOBC::buttonLimit);
 	keypad->attach(BUTTON_CHECK, this, &OpenOBC::buttonCheck);
 	keypad->attach(BUTTON_KMMLS, this, &OpenOBC::buttonKMMLS);
 	keypad->attach(BUTTON_CLOCK, this, &OpenOBC::buttonClock);
@@ -299,10 +325,18 @@ OpenOBC::OpenOBC()
 	//analog input configuration
 	batteryVoltage = new AnalogIn(BATTERY_VOLTAGE_PORT, BATTERY_VOLTAGE_PIN, REFERENCE_VOLTAGE + atof(config->getValueByName("VoltageReferenceCalibration").c_str()), (10 + 2.2) / 2.2 * REFERENCE_VOLTAGE);
 	temperature = new AnalogIn(EXT_TEMP_PORT,EXT_TEMP_PIN, REFERENCE_VOLTAGE + atof(config->getValueByName("VoltageReferenceCalibration").c_str()));
-
-	printf("openOBC firmware version: %s\r\n", GIT_VERSION);
-	lcd->printf("openOBC %s", GIT_VERSION);
+	
+	lcd->printf("Hello Damon!");
 	delay(3000);
+	
+	//Initialize variables
+	avgMilesPerGallon = 0.0;
+	numOfMileageMeasures = 0.0;
+	
+	cur1000number = 0;
+	cur100number = 0;
+	cur10number = 0;
+	cur1number = 0;
 	
 	go = true;
 }
@@ -318,13 +352,27 @@ void OpenOBC::mainloop()
 	
 	while(1)
 	{
-		if(!*stalkButton)
-			lcd->printfClock("  :D");
-		else
-			lcd->printfClock("%02i%02i", rtc->getHours(), rtc->getMinutes());
+		//if(!*stalkButton)
+		//	lcd->printfClock("  :D");
+		//else
+		//	lcd->printfClock("%02i%02i", rtc->getHours(), rtc->getMinutes());
 
 		ccm->task();
 		diag->task();
+		
+		switch(clockDisplayMode)
+		{
+		  case DISPLAY_CLOCK:
+		  {
+		    lcd->printfClock("%02i:%02i", rtc->getHours(), rtc->getMinutes());
+		    break;
+		  }
+		  case DISPLAY_DATE:
+		  {
+		    lcd->printfClock("%02i-%02i", 99, 99);
+		    break;
+		  }
+		}
 
 		switch(displayMode)
 		{
@@ -339,46 +387,73 @@ void OpenOBC::mainloop()
 					lcd->printf("%3.1f km/h", speed->getSpeed());
 				else
 					lcd->printf("%3.1f mph", speed->getSpeed() * 0.621371);
+				delay(500);
 				break;
 			}
-			case DISPLAY_TEMP:
+			case DISPLAY_TEMP_1:
 			{
 				float voltage = temperature->read();
 				float resistance = (10000 * voltage) / (3.3 - voltage);
 				float temperature = 1.0 / ((1.0 / 298.15) + (1.0/3950) * log(resistance / 4700)) - 273.15f;
-				lcd->printf("%.1fC  %.1fF", temperature, temperature * 1.78 + 32);
+				if(useMetricSystem)
+				  lcd->printf("Outside Temp: %.1fC", temperature);
+				else
+				  lcd->printf("Outside Temp: %.1fF", temperature * 1.78 + 32);
+				break;
+			}
+			case DISPLAY_TEMP_2:
+			{
+			  float coolantTemp = 0.0;
+			  if(useMetricSystem)
+			    lcd->printf("Coolant Temp: %.1fC", coolantTemp);
+			  else
+			    lcd->printf("Coolant Temp: %.1fF", coolantTemp * 1.78 + 32);
+			  break;
+			}
+			case DISPLAY_CODE:
+			{
+				lcd->printf("ENTER CODE %i%i%i%i", cur1000number, cur100number, cur10number, cur1number);
 				break;
 			}
 			case DISPLAY_CONSUM1:
 			{
+				numOfMileageMeasures++;
 				float litresPerHour = 0.2449 * 6 * 60 * fuelCons->getDutyCycle();
 				float gallonsPerHour = litresPerHour / 3.78514;
-				float kilometresPerHour = speed->getSpeed();
+				float kilometresPerHour = speed->getSpeed();				
 				float milesPerHour = kilometresPerHour * 0.621371;
+				float milesPerGallon = milesPerHour / gallonsPerHour;
+				avgMilesPerGallon = ((avgMilesPerGallon * (numOfMileageMeasures-1)) + milesPerGallon) / numOfMileageMeasures;
+				float avgLPerHundred = avgMilesPerGallon * 235.214584;
+				float literPerHundred = milesPerGallon * 235.214584;
 				if(useMetricSystem)
-					lcd->printf("%i L/100km", litresPerHour / (100 * kilometresPerHour));
+					lcd->printf("avg %i cur %i L/100km", avgLPerHundred, literPerHundred);
 				else
-					lcd->printf("%.1f mpg", milesPerHour / gallonsPerHour);
+					lcd->printf("avg %.1f cur %i mpg", avgMilesPerGallon, milesPerGallon);
+				delay(700);
 				break;
 			}
 			case DISPLAY_CONSUM2:
 			{
 				float litresPerMinute = 0.2449 * 6 * fuelCons->getDutyCycle();
 				float gallonsPerMinute = litresPerMinute / 3.78514;
+				float poundsPerHour = (litresPerMinute * 60) * 1.629942;
 				if(useMetricSystem)
-					lcd->printf("%.3f L/min", litresPerMinute);
+					lcd->printf("%.2f LPH", litresPerMinute * 60);
 				else
-					lcd->printf("%.3f gal/hour", gallonsPerMinute * 60);
+					lcd->printf("%.2f #/hour", poundsPerHour);
+				delay(500);
 				break;
 			}
 			case DISPLAY_CONSUM3:
 			{
-				lcd->printf("%2.1f%% rpm: %4.0f", fuelCons->getDutyCycle() * 100, fuelCons->getRpm());
+				lcd->printf("IDC:%2.1f%% RPM: %4.0f", fuelCons->getDutyCycle() * 100, fuelCons->getRpm());
+				delay(500);
 				break;
 			}
 			case DISPLAY_OPENOBC:
 			{
-				lcd->printf("openOBC");
+				lcd->printf("openOBC v0.1");
 				break;
 			}	
 			case DISPLAY_CHECK:
@@ -403,6 +478,125 @@ void OpenOBC::mainloop()
 			{
 				lcd->printf("outputs: 0x%02x 0x%02x", out0Bits, out1Bits);
 				break;
+			}
+			case DISPLAY_LIMIT:
+			{
+				lcd->printf("LIMIT BUTTON");
+				break;
+			}
+			case DISPLAY_TIMER1:
+			{
+				if(isTiming)
+				{
+				  this->timerTimed_ms = timerTimer.read_ms();
+				  timedSeconds = timerTimed_ms / 1000.0;
+				  lcd->printf("%.2lf seconds", timedSeconds);
+				}
+				else
+				{
+				  lcd->printf("%.2lf seconds", timedSeconds);
+				}
+				break;
+			}
+			case DISPLAY_TIMER2_1:
+			{
+			  lcd->printf("openBOX Press SET");
+			  break;
+			}
+			case DISPLAY_TIMER2_2:
+			{
+			  lcd->printf("From: %i%i", cur10number, cur1number);
+			  break;
+			}
+			case DISPLAY_TIMER2_3:
+			{
+			  lcd->printf("To: %i%i%i", cur100number, cur10number, cur1number);
+			  break;
+			}
+			case DISPLAY_TIMER2_4:
+			{
+			  lcd->printf("Ready? Press SET");
+			  break;
+			}
+			case DISPLAY_TIMER2_5:
+			{
+			  accelTimed = 0.0;
+			  if(useMetricSystem)
+			  {
+			      curSpeed = speed->getSpeed();
+			      if(curSpeed > accelFrom)
+				lcd->printf("Slow to %2.0f", accelFrom);
+			      else
+			      {
+				displayMode = DISPLAY_TIMER2_6_M;
+			      }
+			  }
+			  else
+			  {
+			      curSpeed = speed->getSpeed() * 0.621371;
+			      if(curSpeed > accelFrom)
+				lcd->printf("Slow to %2.0f", accelFrom);
+			      else
+				displayMode = DISPLAY_TIMER2_6_A;
+			  }
+			  break;
+			}
+			case DISPLAY_TIMER2_6_M:
+			{
+			  lcd->printf("%2.0f-%3.0f Time: ---", accelFrom, accelTo);
+			  curSpeed = speed->getSpeed();
+			  if(curSpeed > accelFrom)
+			  {
+			    timerTimer.start();
+			    displayMode = DISPLAY_TIMER2_7_M;
+			  }
+			  break;
+			}
+			case DISPLAY_TIMER2_7_M:
+			{
+			  this->timerTimed_ms = timerTimer.read_ms();
+			  float curTime = timerTimed_ms / 1000.0;
+			  lcd->printf("TIMING! %3.2f", curTime);
+			  curSpeed = speed->getSpeed();
+			  if(curSpeed >= accelTo)
+			  {
+			    this->timerTimed_ms = timerTimer.read_ms();
+			    accelTimed = timerTimed_ms / 1000.0;
+			    lcd->printf("%2.0f-%3.0f Time: %2.1f", accelFrom, accelTo, accelTimed);
+			    displayMode = DISPLAY_TIMER2_8;
+			  }
+			  break;
+			}
+			case DISPLAY_TIMER2_6_A:
+			{
+			  lcd->printf("%2.0f-%3.0f Time: ---", accelFrom, accelTo);
+			  curSpeed = speed->getSpeed() * 0.621371;
+			  if(curSpeed > accelFrom)
+			  {
+			    timerTimer.start();
+			    displayMode = DISPLAY_TIMER2_7_A;
+			  }
+			  break;
+			}
+			case DISPLAY_TIMER2_7_A:
+			{
+			  this->timerTimed_ms = timerTimer.read_ms();
+			  float curTime = timerTimed_ms / 1000.0;
+			  lcd->printf("TIMING! %3.2f", curTime);
+			  curSpeed = speed->getSpeed() * 0.621371;
+			  if(curSpeed >= accelTo)
+			  {
+			    this->timerTimed_ms = timerTimer.read_ms();
+			    accelTimed = timerTimed_ms / 1000.0;
+			    lcd->printf("%2.0f-%3.0f Time: %2.1f", accelFrom, accelTo, accelTimed);
+			    displayMode = DISPLAY_TIMER2_8;
+			  }
+			  break;
+			}
+			case DISPLAY_TIMER2_8:
+			{
+			  lcd->printf("%2.0f-%3.0f Time: %2.1f", accelFrom, accelTo, accelTimed);
+			  break;
 			}
 			default:
 			{
@@ -432,6 +626,7 @@ void OpenOBC::mainloop()
 		if(doUnlock)
 		{
 			printf("doing unlock\r\n");
+			lcd->printf("Unlocking Doors!");
 			zke->unlock();
 			printf("done\r\n");
 			doUnlock = false;
@@ -439,6 +634,7 @@ void OpenOBC::mainloop()
 		if(doLock)
 		{
 			printf("doing lock\r\n");
+			lcd->printf("Locking Doors");
 			zke->lock();
 			printf("done\r\n");
 			doLock = false;
@@ -501,35 +697,55 @@ void OpenOBC::wake()
 
 void OpenOBC::button1000()
 {
-	if(displayMode != DISPLAY_OUTPUTS)
-	{
-		displayMode = DISPLAY_OUTPUTS;
-		return;
-	}
-	out0Bits *= 2;
-	if(out0Bits == 0)
-		out0Bits = (1<<0);
-	if(out0Bits > (1<<7))
-		out0Bits = 0;
+	//if(displayMode != DISPLAY_OUTPUTS)
+	//{
+	//	displayMode = DISPLAY_OUTPUTS;
+	//	return;
+	//}
+	//out0Bits *= 2;
+	//if(out0Bits == 0)
+	//	out0Bits = (1<<0);
+	//if(out0Bits > (1<<7))
+	//	out0Bits = 0;
+	if(cur1000number >= 9)
+	  cur1000number = 0;
+	else
+	  cur1000number++;
 }
 
 void OpenOBC::button100()
 {
-	if(displayMode != DISPLAY_OUTPUTS)
-	{
-		displayMode = DISPLAY_OUTPUTS;
-		return;
-	}
-	out1Bits *= 2;
-	if(out1Bits == 0)
-		out1Bits = (1<<0);
-	if(out1Bits > (1<<7))
-		out1Bits = 0;
+	//if(displayMode != DISPLAY_OUTPUTS)
+	//{
+	//	displayMode = DISPLAY_OUTPUTS;
+	//	return;
+	//}
+	//out1Bits *= 2;
+	//if(out1Bits == 0)
+	//	out1Bits = (1<<0);
+	//if(out1Bits > (1<<7))
+	//	out1Bits = 0;
+	if(cur100number >= 9)
+	  cur100number = 0;
+	else
+	  cur100number++;
+}
+
+void OpenOBC::button10()
+{
+	if(cur10number >= 9)
+	  cur10number = 0;
+	else
+	  cur10number++;
 }
 
 void OpenOBC::button1()
 {
-	displayMode = DISPLAY_OPENOBC;
+	//displayMode = DISPLAY_OPENOBC;
+	if(cur1number >= 9)
+	  cur1number = 0;
+	else
+	  cur1number++;
 }
 
 void OpenOBC::buttonConsum()
@@ -551,7 +767,15 @@ void OpenOBC::buttonRange()
 
 void OpenOBC::buttonTemp()
 {
-	displayMode = DISPLAY_TEMP;
+    if(displayMode == DISPLAY_TEMP_1)
+	displayMode = DISPLAY_TEMP_2;
+    else
+      displayMode = DISPLAY_TEMP_1;
+}
+
+void OpenOBC::buttonCode()
+{
+	displayMode = DISPLAY_CODE;
 }
 
 void OpenOBC::buttonSpeed()
@@ -566,7 +790,16 @@ void OpenOBC::buttonDist()
 
 void OpenOBC::buttonTimer()
 {
-	doQuery = true;
+	//doQuery = true;
+	if(displayMode == DISPLAY_TIMER1)
+	  displayMode = DISPLAY_TIMER2_1;
+	else
+	  displayMode = DISPLAY_TIMER1;
+}
+
+void OpenOBC::buttonLimit()
+{
+      displayMode = DISPLAY_LIMIT;
 }
 
 void OpenOBC::buttonCheck()
@@ -582,11 +815,13 @@ void OpenOBC::buttonKMMLS()
 void OpenOBC::buttonClock()
 {
 	doUnlock = true;
+	clockDisplayMode = DISPLAY_CLOCK;
 }
 
 void OpenOBC::buttonDate()
 {
 	doLock = true;
+	clockDisplayMode = DISPLAY_DATE;
 }
 
 void OpenOBC::buttonMemo()
@@ -596,18 +831,63 @@ void OpenOBC::buttonMemo()
 
 void OpenOBC::buttonSet()
 {
-	if(doSnoop)
+	if(displayMode == DISPLAY_TIMER1)
 	{
-		printf("not snooping\r\n");
-		diag->detach(this, &OpenOBC::printDS2Packet);
-		doSnoop = false;
+	  if(isTiming)
+	  {
+	      isTiming = false;
+	      this->timerTimed_ms = timerTimer.read_ms();
+	  }
+	  else
+	  {
+	    isTiming = true;
+	    timedSeconds = 0;
+	    timerTimer.start();
+	  }
 	}
-	else
+	else if(displayMode == DISPLAY_TIMER2_1)
 	{
-		printf("snooping...\r\n");
-		diag->attach(this, &OpenOBC::printDS2Packet);
-		doSnoop = true;
+	  accelTimerMode = true;
+	  displayMode = DISPLAY_TIMER2_2;
+	  cur10number = 0;
+	  cur1number = 0;
 	}
+	else if(displayMode == DISPLAY_TIMER2_2)
+	{
+	  accelFrom = (cur10number * 10) + cur1number;
+	  cur100number = 0;
+	  cur10number = 0;
+	  cur1number = 0;
+	  displayMode = DISPLAY_TIMER2_3;
+	}
+	else if(displayMode == DISPLAY_TIMER2_3)
+	{
+	  accelTo = (cur100number * 100) + (cur10number * 10) + cur1number;
+	  displayMode = DISPLAY_TIMER2_4;
+	}
+	else if(displayMode == DISPLAY_TIMER2_4)
+	{
+	  accelReadyToTime = true;
+	  displayMode = DISPLAY_TIMER2_5;
+	}
+	else if(displayMode == DISPLAY_TIMER2_8)
+	{
+	  displayMode = DISPLAY_TIMER2_2;
+	}
+	
+	//Snooping stuff
+	//if(doSnoop)
+	//{
+	//	printf("not snooping\r\n");
+	//	diag->detach(this, &OpenOBC::printDS2Packet);
+	//	doSnoop = false;
+	//}
+	//else
+	//{
+	//	printf("snooping...\r\n");
+	//	diag->attach(this, &OpenOBC::printDS2Packet);
+	//	doSnoop = true;
+	//}
 }
 
 void runHandler()

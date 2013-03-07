@@ -95,7 +95,7 @@ uint32_t ObcKeypad::getKeys()
 void ObcKeypad::scan()
 {
 	uint32_t key = getKeys(); //TODO support multiple keys
-
+	printf("Pressed key: 0x%x\r\n", key);
 	switch(key)
 	{
 		case BUTTON_1000_MASK:

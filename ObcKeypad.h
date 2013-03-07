@@ -31,24 +31,24 @@
 #include "InterruptManager.h"
 #include "Timer.h"
 
-#define BUTTON_1000_MASK (1<<4)
 #define BUTTON_100_MASK (1<<0)
-#define BUTTON_10_MASK (1<<12)
-#define BUTTON_1_MASK (1<<16)
-#define BUTTON_CONSUM_MASK (1<<5)
-#define BUTTON_TEMP_MASK (1<<00000000000000000000000000000111) //value not yet known... need to fix my TEMP button :|
-#define BUTTON_SPEED_MASK (1<<11)
+#define BUTTON_TEMP_MASK (1<<1)//NOT CORRECT
 #define BUTTON_DIST_MASK (1<<2)
-#define BUTTON_CHECK_MASK (1<<6)
-#define BUTTON_RANGE_MASK (1<<13)
-#define BUTTON_CODE_MASK (1<<17)
-#define BUTTON_LIMIT_MASK (1<<8)
-#define BUTTON_TIMER_MASK (1<<18)
-#define BUTTON_KMMLS_MASK (1<<14)
 #define BUTTON_CLOCK_MASK (1<<3)
+#define BUTTON_1000_MASK (1<<4)
+#define BUTTON_CONSUM_MASK (1<<5)
+#define BUTTON_CHECK_MASK (1<<6)
 #define BUTTON_DATE_MASK (1<<7)
-#define BUTTON_MEMO_MASK (1<<19)
+#define BUTTON_LIMIT_MASK (1<<8)
+#define BUTTON_SPEED_MASK (1<<11)
+#define BUTTON_10_MASK (1<<12)
+#define BUTTON_RANGE_MASK (1<<13)
+#define BUTTON_KMMLS_MASK (1<<14)
 #define BUTTON_SET_MASK (1<<15)
+#define BUTTON_1_MASK (1<<16)
+#define BUTTON_CODE_MASK (1<<17)
+#define BUTTON_TIMER_MASK (1<<18)
+#define BUTTON_MEMO_MASK (1<<19)
 
 typedef enum
 {

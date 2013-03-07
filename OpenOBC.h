@@ -53,7 +53,21 @@ typedef enum
 	DISPLAY_CONSUM1,
 	DISPLAY_CONSUM2,
 	DISPLAY_CONSUM3,
-	DISPLAY_TEMP,
+	DISPLAY_TEMP_1,
+	DISPLAY_TEMP_2,
+	DISPLAY_CODE,
+	DISPLAY_LIMIT,
+	DISPLAY_TIMER1,
+	DISPLAY_TIMER2_1,
+	DISPLAY_TIMER2_2,
+	DISPLAY_TIMER2_3,
+	DISPLAY_TIMER2_4,
+	DISPLAY_TIMER2_5,
+	DISPLAY_TIMER2_6_M,
+	DISPLAY_TIMER2_6_A,
+	DISPLAY_TIMER2_7_M,
+	DISPLAY_TIMER2_7_A,
+	DISPLAY_TIMER2_8,
 	DISPLAY_SPEED,
 	DISPLAY_VOLTAGE,
 	DISPLAY_OPENOBC,
@@ -62,6 +76,12 @@ typedef enum
 	DISPLAY_FUEL_LEVEL,
 	DISPLAY_OUTPUTS
 } DisplayMode_Type;
+
+typedef enum
+{
+	DISPLAY_CLOCK,
+	DISPLAY_DATE
+} ClockDisplayMode_Type;
 
 class OpenOBC : public InterruptManagerOwner
 {
@@ -72,18 +92,21 @@ public:
 	void buttonConsum();
 	void buttonRange();
 	void buttonTemp();
+	void buttonCode();
 	void buttonSpeed();
 	void buttonKMMLS();
-	void button1();
 	void buttonCheck();
 	void buttonSet();
 	void buttonMemo();
 	void buttonDist();
 	void button1000();
 	void button100();
+	void button10();
+	void button1();
 	void buttonClock();
 	void buttonDate();
 	void buttonTimer();
+	void buttonLimit();
 	
 	SPI* spi1;
 	IO* lcdLight;
@@ -123,12 +146,14 @@ private:
 	IO* out0Cs;
 	IO* out1Cs;
 	DisplayMode_Type displayMode;
+	ClockDisplayMode_Type clockDisplayMode;
 	AnalogIn* batteryVoltage;
 	AnalogIn* temperature;
 	SpeedInput* speed;
 	FuelConsumption* fuelCons;
 	bool useMetricSystem;
 	
+	uint32_t timerTimed_ms;
 };
 
 
